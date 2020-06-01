@@ -1,7 +1,7 @@
 /**
  *  Inovelli Fan + Light LZW36
  *  Author: Eric Maycock (erocm123)
- *  Date: 2020-04-24
+ *  Date: 2020-05-18
  *
  *  Copyright 2020 Inovelli / Eric Maycock
  *
@@ -43,7 +43,6 @@ metadata {
         command "childRefresh"
         command "childSetLevel"
 
-        fingerprint manufacturer: "031E", prod: "000D", model: "0001", deviceJoinName: "Inovelli Fan + Light"
         fingerprint manufacturer: "031E", prod: "000E", model: "0001", deviceJoinName: "Inovelli Fan + Light"
         
         fingerprint deviceId: "0x1100", inClusters: "0x5E,0x55,0x98,0x9F,0x6C,0x26,0x70,0x85,0x59,0x8E,0x86,0x72,0x5A,0x73,0x75,0x22,0x7A,0x5B,0x87,0x60"
@@ -121,6 +120,10 @@ def parse(description) {
             if (debugEnable) log.debug "Couldn't zwave.parse '$description'" 
         }
     }
+    
+    //New SmartThings app is changing child device to a "placeholder" device type
+    checkChildTypes()
+    
     def now
     if(location.timeZone)
     now = new Date().format("yyyy MMM dd EEE h:mm:ss a", location.timeZone)
@@ -131,7 +134,7 @@ def parse(description) {
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicReport cmd, ep = null) {
-    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep}"
+    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep?ep:0}"
     if (infoEnable) log.info "${device.label?device.label:device.name}: Basic report received with value of ${cmd.value ? "on" : "off"} - ep${ep}"
     if (ep) {
         def event
@@ -173,7 +176,7 @@ def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicReport cmd, ep = null) 
 def zwaveEvent(physicalgraph.zwave.commands.multichannelassociationv2.MultiChannelAssociationReport cmd) {
 	if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
     if (cmd.groupingIdentifier == 1) {
-        if ([0,zwaveHubNodeId,1] == cmd.nodeId) state."associationMC${cmd.groupingIdentifier}" = true
+        if ([0,zwaveHubNodeId,0] == cmd.nodeId) state."associationMC${cmd.groupingIdentifier}" = true
         else state."associationMC${cmd.groupingIdentifier}" = false
     }
 }
@@ -189,7 +192,7 @@ def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicSet cmd) {
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd, ep = null) {
-    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep}"
+    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep?ep:0}"
     if (infoEnable) log.info "${device.label?device.label:device.name}: Switch Binary report received with value of ${cmd.value ? "on" : "off"} - ep${ep}"
     if (ep) {
         def event
@@ -222,7 +225,7 @@ def zwaveEvent(physicalgraph.zwave.commands.switchbinaryv1.SwitchBinaryReport cm
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd, ep = null) {
-    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep}"
+    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep?ep:0}"
     if (infoEnable) log.info "${device.label?device.label:device.name}: Switch MultiLevel report received with value of ${cmd.value ? "on" : "off"} - ep${ep}"
     if (ep) {
         def event
@@ -262,7 +265,7 @@ def zwaveEvent(physicalgraph.zwave.commands.switchmultilevelv3.SwitchMultilevelR
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.indicatorv1.IndicatorReport cmd, ep=null) {
-	if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep}"
+	if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep?ep:0}"
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.multichannelv3.MultiChannelCmdEncap cmd) {
@@ -530,9 +533,7 @@ def refresh() {
     cmds << encap(zwave.switchMultilevelV1.switchMultilevelGet(), 2)
     cmds << zwave.meterV3.meterGet(scale: 0)
     cmds << zwave.meterV3.meterGet(scale: 2)
-	cmds << encap(zwave.meterV3.meterGet(scale: 2),1)
-    cmds << encap(zwave.meterV3.meterGet(scale: 2),2)
-    return commands(cmds)
+    return commands(cmds, 100)
 }
 
 def ping() {
@@ -557,6 +558,19 @@ def updated() {
             return null
     } else {
         if (infoEnable) log.info "${device.label?device.label:device.name}: updated() ran within the last 2 seconds. Skipping execution."
+    }
+}
+
+private checkChildTypes() {
+    def childDevice = childDevices.find{it.deviceNetworkId.endsWith("ep001")}
+    if (childDevice && (childDevice.typeName.indexOf("Switch Level Child Device") < 0)) {
+        if (infoEnable) log.info "${device.label?device.label:device.name}: The new SmartThings app is changing child device to the incorrect device handler. Changing it back."
+        childDevice.setDeviceType("InovelliUSA","Switch Level Child Device")
+    }
+    childDevice = childDevices.find{it.deviceNetworkId.endsWith("ep002")}
+    if (childDevice && (childDevice.typeName.indexOf("Switch Level Child Device") < 0)) {
+        if (infoEnable) log.info "${device.label?device.label:device.name}: The new SmartThings app is changing child device to the incorrect device handler. Changing it back."
+        childDevice.setDeviceType("InovelliUSA","Switch Level Child Device")
     }
 }
 
@@ -737,6 +751,8 @@ def initialize() {
     }
     state.oldLabel = device.label
     
+    checkChildTypes()
+        
     /*
     sendEvent([name:"pressUpX1", value:pressUpX1Label? "${pressUpX1Label} ▲" : "Tap ▲", displayed: false])
     sendEvent([name:"pressDownX1", value:pressDownX1Label? "${pressDownX1Label} ▼" : "Tap ▼", displayed: false])
@@ -757,7 +773,7 @@ def initialize() {
     if(!state.associationMC1) {
        log.debug "Adding MultiChannel association group 1"
        cmds << zwave.associationV2.associationRemove(groupingIdentifier: 1, nodeId: [])
-       cmds << zwave.multiChannelAssociationV2.multiChannelAssociationSet(groupingIdentifier: 1, nodeId: [0,zwaveHubNodeId,1])
+       cmds << zwave.multiChannelAssociationV2.multiChannelAssociationSet(groupingIdentifier: 1, nodeId: [0,zwaveHubNodeId,0])
        cmds << zwave.multiChannelAssociationV2.multiChannelAssociationGet(groupingIdentifier: 1)
     }
     
@@ -776,8 +792,8 @@ def initialize() {
     
     if (state.localProtectionStateLight?.toInteger() != settings.disableLocalLight?.toInteger() || state.rfProtectionState?.toInteger() != settings.disableRemoteLight?.toInteger()) {
         if (infoEnable) log.info "${device.label?device.label:device.name}: Protection command class settings need to be updated"
-        //cmds << encap(zwave.protectionV2.protectionSet(localProtectionState : disableLocal!=null? disableLocal.toInteger() : 0, rfProtectionState: disableRemote!=null? disableRemote.toInteger() : 0), 1)
-        cmds << encap(zwave.protectionV2.protectionGet(), 0)
+        cmds << zwave.protectionV2.protectionSet(localProtectionState : disableLocal!=null? disableLocal.toInteger() : 0, rfProtectionState: disableRemote!=null? disableRemote.toInteger() : 0)
+        cmds << zwave.protectionV2.protectionGet()
     } else {
         if (infoEnable) log.info "${device.label?device.label:device.name}: No Protection command class settings to update"
     }
@@ -794,7 +810,7 @@ def childExists(ep) {
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.centralscenev1.CentralSceneNotification cmd, ep=null) {
-    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
+    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd} - ep${ep?ep:0}"
     switch (cmd.keyAttributes) {
        case 0:
        if (cmd.sceneNumber == 3) createEvent(buttonEvent(7, "pushed", "physical"))
@@ -816,7 +832,7 @@ def zwaveEvent(physicalgraph.zwave.commands.centralscenev1.CentralSceneNotificat
 }
 
 def zwaveEvent(physicalgraph.zwave.commands.meterv3.MeterReport cmd, ep=null) {
-    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${cmd}"
+    if (debugEnable) log.debug "${device.label?device.label:device.name}: ${ep?ep:0}"
     def event
 	if (cmd.scale == 0) {
     	if (cmd.meterType == 161) {
@@ -1491,7 +1507,7 @@ def getParameterInfo(number, value){
     parameter.parameter29type="number"
     parameter.parameter30type="number"
 
-    parameter.parameter1default=4
+    parameter.parameter1default=3
     parameter.parameter2default=99
     parameter.parameter3default=99
     parameter.parameter4default=99
